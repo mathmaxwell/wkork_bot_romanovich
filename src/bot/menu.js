@@ -1,6 +1,6 @@
-import { Keyboard } from 'grammy'
+import { Keyboard, InlineKeyboard } from 'grammy'
 import { myDataKeyboard } from './keyboards.js'
-import { REGION } from './fields.js'
+import { countCompletedSlots } from '../services/reports.js'
 
 // Пункты меню (раздел 2). Пока заглушки — будут реализованы на следующих этапах.
 export const MENU_ITEMS = [
@@ -28,6 +28,44 @@ export const mainMenuKeyboard = () => {
 export async function showMenu(ctx, greeting) {
   const text = greeting || 'Главное меню. Выберите раздел:'
   await ctx.reply(text, { reply_markup: mainMenuKeyboard() })
+}
+
+// 2.2 Подменю отчётов по слотам.
+export const slotReportKeyboard = () =>
+  new InlineKeyboard()
+    .text('▶️ Выход в смену', 'flowstart:slot_shift_start').row()
+    .text('⏹ Завершение смены', 'flowstart:slot_shift_end').row()
+    .text('🚫 Невыход в смену', 'flowstart:slot_no_show').row()
+    .text('⏏️ Ранний сход со смены', 'flowstart:slot_early_leave')
+
+// 2.5 Подменю светофора (экипировка + претензия).
+export const trafficLightKeyboard = () =>
+  new InlineKeyboard()
+    .text('🧰 Экипировка: получил', 'flowstart:equipment_received').row()
+    .text('🧰 Экипировка: сдал', 'flowstart:equipment_returned').row()
+    .text('📝 Претензия', 'flowstart:claim')
+
+export async function showSlotReports(ctx) {
+  await ctx.reply('📊 Отчёт по слотам. Выберите тип:', { reply_markup: slotReportKeyboard() })
+}
+
+// 2.5 Светофор: 1/5 слотов + зелёная галочка при достижении 5.
+export async function showTrafficLight(ctx, courier) {
+  if (!courier?.id) {
+    await ctx.reply('Сначала пройдите регистрацию через /start.')
+    return
+  }
+  const done = await countCompletedSlots(courier.id)
+  const target = 5
+  const reached = done >= target
+  const mark = reached ? '✅' : '🟡'
+  const text =
+    `🚦 Светофор\n\n` +
+    `Отработано слотов: ${Math.min(done, target)}/${target} ${mark}\n` +
+    (reached
+      ? 'Поздравляем! Порог в 5 слотов достигнут.'
+      : `До зелёной галочки осталось слотов: ${target - done}.`)
+  await ctx.reply(text, { reply_markup: trafficLightKeyboard() })
 }
 
 const FIELD_LABELS = [

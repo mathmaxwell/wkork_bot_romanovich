@@ -13,10 +13,10 @@ export const courierTypeKeyboard = () =>
     .text('🆕 Новый курьер', 'reg:new').row()
     .text('♻️ Действующий курьер', 'reg:existing')
 
-export const confirmKeyboard = () =>
+export const confirmKeyboard = (label = '📨 Отправить') =>
   new InlineKeyboard()
-    .text('📨 Отправить на регистрацию', 'reg:submit').row()
-    .text('✖️ Отменить', 'reg:cancel')
+    .text(label, 'flow:submit').row()
+    .text('✖️ Отменить', 'flow:cancel')
 
 export const myDataKeyboard = () =>
   new InlineKeyboard()
@@ -42,6 +42,14 @@ export const choiceKeyboard = (options, { optional = false } = {}) => {
 
 // Клавиатура для обычного текстового шага (с «Пропустить», если поле опционально).
 export const textStepKeyboard = ({ optional = false } = {}) => {
+  const kb = new Keyboard()
+  if (optional) kb.text(SKIP_LABEL).row()
+  kb.text(CANCEL_LABEL)
+  return kb.resized()
+}
+
+// Клавиатура для шага с вложением (фото/видео). «Пропустить», если необязательно.
+export const mediaKeyboard = ({ optional = false } = {}) => {
   const kb = new Keyboard()
   if (optional) kb.text(SKIP_LABEL).row()
   kb.text(CANCEL_LABEL)

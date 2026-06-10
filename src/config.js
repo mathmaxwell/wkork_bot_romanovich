@@ -15,4 +15,7 @@ export const config = {
   managerChatId: process.env.MANAGER_CHAT_ID || null,
   webAppUrl: process.env.WEBAPP_URL || null,
   kisArtLink: process.env.KIS_ART_LINK || null,
+  rocketUrl: process.env.ROCKET_URL || null,
+  magnitUrl: process.env.MAGNIT_URL || null,
+  screenRecorderUrl: process.env.SCREEN_RECORDER_URL || null,
 }

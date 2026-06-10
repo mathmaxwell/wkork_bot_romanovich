@@ -33,3 +33,50 @@ CREATE TABLE IF NOT EXISTS couriers (
 
 CREATE INDEX IF NOT EXISTS idx_couriers_telegram ON couriers (telegram_id);
 CREATE INDEX IF NOT EXISTS idx_couriers_status   ON couriers (status);
+
+-- Раздел 2.2: отчёты по слотам (выход / невыход / ранний сход / завершение смены)
+CREATE TABLE IF NOT EXISTS slot_reports (
+  id            SERIAL PRIMARY KEY,
+  courier_id    INTEGER NOT NULL REFERENCES couriers (id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL,                 -- shift_start | no_show | early_leave | shift_end
+  slot_date     TEXT,
+  slot_time     TEXT,
+  zone          TEXT,
+  reason        TEXT,                           -- причина (для невыхода / раннего схода)
+  attachments   JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{type,file_id}]
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_slot_reports_courier ON slot_reports (courier_id, kind);
+
+-- Раздел 2.5: экипировка (получил / сдал)
+CREATE TABLE IF NOT EXISTS equipment_events (
+  id            SERIAL PRIMARY KEY,
+  courier_id    INTEGER NOT NULL REFERENCES couriers (id) ON DELETE CASCADE,
+  action        TEXT NOT NULL,                  -- received | returned
+  bag_number    TEXT,
+  city          TEXT,
+  photo_file_id TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_equipment_courier ON equipment_events (courier_id);
+
+-- Раздел 2.5: претензии
+CREATE TABLE IF NOT EXISTS claims (
+  id            SERIAL PRIMARY KEY,
+  courier_id    INTEGER NOT NULL REFERENCES couriers (id) ON DELETE CASCADE,
+  reason        TEXT NOT NULL,
+  order_number  TEXT,
+  description   TEXT,
+  attachments   JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_claims_courier ON claims (courier_id);
+
+-- Раздел 2.3: обращения к менеджеру (для троттлинга «раз в 15 минут»)
+CREATE TABLE IF NOT EXISTS manager_requests (
+  id            SERIAL PRIMARY KEY,
+  courier_id    INTEGER NOT NULL REFERENCES couriers (id) ON DELETE CASCADE,
+  message       TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_manager_requests_courier ON manager_requests (courier_id, created_at);

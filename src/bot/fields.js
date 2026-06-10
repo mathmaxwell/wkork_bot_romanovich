@@ -63,7 +63,7 @@ function injectCity(value, flow) {
   }
   // Городские блоки (Москва/СПб) запрашиваются только при полной регистрации нового
   // курьера и при редактировании. Для «действующего» курьера (1.5) — базовый набор.
-  const wantsCityBlock = flow.type === 'new' || flow.type === 'edit'
+  const wantsCityBlock = flow.regType === 'new' || flow.regType === 'edit'
   if (!wantsCityBlock) return {}
   if (value === REGION.MOSCOW) return { end: moscowFields() }
   if (value === REGION.SPB) return { end: spbFields() }

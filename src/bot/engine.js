@@ -1,31 +1,40 @@
-import { buildCourierFields } from './fields.js'
 import {
-  contactKeyboard, choiceKeyboard, textStepKeyboard,
+  contactKeyboard, choiceKeyboard, textStepKeyboard, mediaKeyboard,
   confirmKeyboard, SKIP_LABEL, CANCEL_LABEL,
 } from './keyboards.js'
-import { Keyboard } from 'grammy'
+import { getDefinition } from './flows/index.js'
+import { getByTelegramId } from '../services/courier.js'
 
 const removeKb = { remove_keyboard: true }
 
 /**
- * Старт пошаговой регистрации (1.4 / 1.5 / редактирование).
- * type: 'new' | 'existing' | 'edit'
+ * Универсальный пошаговый движок анкет.
+ *
+ * Определение потока (см. ./flows) описывает поля и обработчик завершения,
+ * а движок ведёт пользователя по шагам, хранит черновик в ctx.session.flow
+ * и по подтверждению вызывает def.onComplete(ctx, draft, courier).
+ *
+ * Поле: { key, label, prompt, type, optional?, options?, validate?, inject? }
+ *   type: 'text' | 'contact' | 'choice' | 'media'
  */
-export async function startFlow(ctx, type) {
-  ctx.session.flow = {
-    type,
-    fields: buildCourierFields(),
+export async function startFlow(ctx, name) {
+  const def = getDefinition(name)
+  if (!def) throw new Error(`Неизвестный поток: ${name}`)
+
+  const flow = {
+    name,
+    fields: def.buildFields(ctx),
     tail: [],
     index: 0,
     draft: {},
     done: false,
+    confirm: def.confirm !== false,
+    submitLabel: def.submitLabel || '📨 Отправить',
   }
-  await ctx.reply(
-    type === 'edit'
-      ? 'Изменение данных. Заполните анкету заново.'
-      : 'Заполните анкету курьера. В любой момент можно нажать «Отмена».',
-    { reply_markup: removeKb },
-  )
+  if (def.init) def.init(flow, ctx)
+  ctx.session.flow = flow
+
+  if (def.intro) await ctx.reply(def.intro, { reply_markup: removeKb })
   await promptCurrent(ctx)
 }
 
@@ -45,6 +54,7 @@ export async function promptCurrent(ctx) {
   let reply_markup
   if (field.type === 'contact') reply_markup = contactKeyboard()
   else if (field.type === 'choice') reply_markup = choiceKeyboard(field.options, { optional: field.optional })
+  else if (field.type === 'media') reply_markup = mediaKeyboard({ optional: field.optional })
   else reply_markup = textStepKeyboard({ optional: field.optional })
 
   await ctx.reply(header + field.prompt, { reply_markup })
@@ -63,6 +73,24 @@ export async function onContact(ctx) {
   const phone = ctx.message.contact?.phone_number
   if (!phone) return false
   storeAndAdvance(flow, field, phone)
+  await promptCurrent(ctx)
+  return true
+}
+
+/** Обработка вложения (фото / видео / документ) в активном media-шаге. */
+export async function onMedia(ctx) {
+  const flow = ctx.session.flow
+  const field = currentField(flow)
+  if (!flow || flow.done || !field || field.type !== 'media') return false
+
+  const msg = ctx.message
+  let att = null
+  if (msg.photo?.length) att = { type: 'photo', file_id: msg.photo[msg.photo.length - 1].file_id }
+  else if (msg.video) att = { type: 'video', file_id: msg.video.file_id }
+  else if (msg.document) att = { type: 'document', file_id: msg.document.file_id }
+  if (!att) return false
+
+  storeAndAdvance(flow, field, [att])
   await promptCurrent(ctx)
   return true
 }
@@ -101,6 +129,12 @@ export async function onText(ctx) {
     return true
   }
 
+  // Шаг ожидает вложение
+  if (field.type === 'media') {
+    await ctx.reply('Пришлите фото или видео' + (field.optional ? ', либо нажмите «Пропустить».' : '.'))
+    return true
+  }
+
   // Выбор из вариантов
   if (field.type === 'choice' && !field.options.includes(text)) {
     await ctx.reply('Пожалуйста, выберите один из вариантов кнопками ниже.')
@@ -121,7 +155,7 @@ export async function onText(ctx) {
   return true
 }
 
-// Сохранить значение, выполнить инъекцию городских полей и перейти к след. шагу.
+// Сохранить значение, выполнить инъекцию доп. полей и перейти к след. шагу.
 function storeAndAdvance(flow, field, value) {
   flow.draft[field.key] = value
 
@@ -133,7 +167,7 @@ function storeAndAdvance(flow, field, value) {
 
   flow.index += 1
 
-  // Когда базовые поля закончились — добавляем отложенные (городские) блоки.
+  // Когда базовые поля закончились — добавляем отложенные блоки.
   while (flow.index >= flow.fields.length && flow.tail.length) {
     flow.fields.push(...flow.tail.splice(0))
   }
@@ -142,11 +176,31 @@ function storeAndAdvance(flow, field, value) {
 async function finishFlow(ctx) {
   const flow = ctx.session.flow
   flow.done = true
-  await ctx.reply(buildSummary(flow), {
-    reply_markup: confirmKeyboard(),
+  if (!flow.confirm) {
+    await submitFlow(ctx)
+    return
+  }
+  await ctx.reply(buildSummary(flow), { reply_markup: removeKb })
+  await ctx.reply('Проверьте данные и подтвердите отправку.', {
+    reply_markup: confirmKeyboard(flow.submitLabel),
   })
-  // Убираем reply-клавиатуру, оставляя inline-кнопки подтверждения.
-  await ctx.reply('Проверьте данные и подтвердите отправку.', { reply_markup: removeKb })
+}
+
+/** Подтверждение отправки (callback flow:submit или авто при confirm:false). */
+export async function submitFlow(ctx) {
+  const flow = ctx.session.flow
+  if (!flow || !flow.done) {
+    await ctx.reply('Активная анкета не найдена. Откройте меню через /start.')
+    return
+  }
+  const def = getDefinition(flow.name)
+  const courier = await getByTelegramId(ctx.from.id)
+  ctx.session.flow = null
+  await def.onComplete(ctx, flow.draft, courier)
+}
+
+export function cancelFlow(ctx) {
+  ctx.session.flow = null
 }
 
 export function buildSummary(flow) {
@@ -156,7 +210,17 @@ export function buildSummary(flow) {
     if (flow.draft[f.key] !== undefined) byKey.set(f.key, { label: f.label, value: flow.draft[f.key] })
   }
   for (const { label, value } of byKey.values()) {
-    lines.push(`• ${label}: ${value ?? '—'}`)
+    lines.push(`• ${label}: ${formatValue(value)}`)
   }
   return lines.join('\n')
+}
+
+function formatValue(value) {
+  if (value == null) return '—'
+  if (Array.isArray(value)) {
+    if (!value.length) return '—'
+    const kinds = value.map((a) => (a.type === 'video' ? 'видео' : a.type === 'document' ? 'файл' : 'фото'))
+    return `вложение (${kinds.join(', ')})`
+  }
+  return String(value)
 }
