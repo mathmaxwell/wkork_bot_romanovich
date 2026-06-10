@@ -1,0 +1,20 @@
+{
+  "name": "courier-bot",
+  "version": "0.1.0",
+  "description": "Единый Telegram-бот для управления курьерами (раздел 1: регистрация)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "migrate": "node src/db/migrate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "pg": "^8.13.1"
+  }
+}
